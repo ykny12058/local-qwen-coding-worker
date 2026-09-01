@@ -1,0 +1,41 @@
+﻿# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+
+# Runtime / temporary workspaces
+workspace/
+workspaces/
+tmp/
+temp/
+cache/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Local models / large weights
+*.gguf
+*.safetensors
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Coverage / test artifacts
+.coverage
+htmlcov/

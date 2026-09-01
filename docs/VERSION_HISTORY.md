@@ -1,0 +1,135 @@
+\# 版本历史
+
+
+
+\## 当前稳定版本
+
+
+
+\### v0.3.10 — Validation Tail Reserve
+
+
+
+加入 Validation Tail。
+
+
+
+当正常 Coding Round 的最后一轮刚好完成源码修改时，不再因为轮次耗尽直接返回 INCOMPLETE。
+
+
+
+Controller 可以进入有限的验证阶段：
+
+
+
+```text
+
+complete pytest
+
+→ git diff --check
+
+→ git diff
+
+→ git status
+
+→ finish
+Validation Tail 只允许验收，不允许继续 Debug。
+如果修改后的完整 pytest 失败：
+Validation Tail
+→ STOP
+→ INCOMPLETE
+不会额外提供新的修复轮次。
+实战验证结果：status: changes_complete
+controller_validation: PASS
+v0.3.9 — Hard Investigation Budget
+加入强制调查预算。
+当模型持续搜索但没有实质进展时，Controller 会关闭 Search Phase。
+解决的问题：
+search
+→ search
+→ search
+→ search
+→ max_rounds exhausted
+Search Phase 关闭后，模型必须根据已有：
+- pytest failure
+- 当前源码
+- 已读文件证据
+执行修改或返回非成功状态。
+v0.3.8 — Tail Nonce / Exact-Match Guard
+每次模型请求末尾加入唯一 nonce。
+目的：
+- 避免完全相同 Prompt
+- 绕过测试环境中观察到的 Exact LCP/KV reuse 异常
+- 保留绝大多数 Prefix Cache
+测试中，Tail Nonce 可以在保留大部分缓存复用的同时，避免 exact-match 边界导致的异常延迟和 timeout。
+v0.3.7 — Streaming Transport
+LM Studio 请求改为 SSE Streaming。
+新增 Transport Telemetry：
+time_to_headers_seconds
+time_to_first_chunk_seconds
+total_inference_time_seconds
+用于判断：
+- 请求是否到达服务器
+- Prompt Processing 是否启动
+- 首 Token 是否正常返回
+- Backend 是否可能卡住
+v0.3.6 — Infrastructure Telemetry
+加入每轮基础设施遥测。
+记录：
+- message_count
+- request_context_chars
+- estimated_context_tokens
+- inference_time_seconds
+- failed_round
+- structured INFRA_ERROR
+帮助区分：
+- Agent Logic 问题
+- LM Studio 问题
+- Transport 问题
+v0.3.5 — Search Convergence
+加入：
+- Duplicate Search Guard
+- No-Progress Guidance
+减少模型反复执行相同或近似搜索。
+v0.3.4 — Edit Failure Recovery
+当精确源码替换失败时：
+- 释放旧 Read Evidence
+- 要求重新读取当前文件
+- 根据最新源码重新生成 replacement
+避免模型不断重试已经失效的 old_text。
+v0.3.3 — Read Refresh / Finish Hardening
+加入：
+- 修改后的 Read Refresh
+- 更严格 Finish Gate
+- 防止测试未通过时错误返回 changes_complete
+v0.3.2
+早期 JSON Coding Worker 稳定化阶段。
+主要完成：
+- JSON Action Controller
+- 基础 WorkspaceTools
+- pytest / Git 操作
+- MCP Gateway 集成
+v0.2.x
+更早期实验版本。
+此阶段仍在探索：
+- Native Tool Calling
+- JSON Worker
+- MCP 调用架构
+- 本地 Qwen 推理方式
+Pre-Git Development
+v0.2.x 和早期 v0.3.x 是在正式 Git 仓库建立之前开发的。
+部分稳定快照保存在：
+archive/
+当前保留的主要 Pre-Git 稳定快照：
+json_coding_worker_v0.3.10_validation_tail_stable.py
+从 v0.3.10 之后，建议正式使用：
+- Git Commit
+- Git Tag
+- Git Release
+管理版本。
+以后尽量不再依赖：
+backup
+final
+stable
+final_final
+这种人工文件名备份方式。
