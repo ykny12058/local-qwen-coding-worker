@@ -6,7 +6,61 @@
 
 
 
-\### v0.3.10 — Validation Tail Reserve
+\### v0.3.11 — Maintenance / Regression Baseline
+
+本版本是围绕 v0.3.10 稳定核心进行的维护与回归基础设施更新。
+
+JSON Coding Worker 的核心实现仍为：
+
+    json_coding_worker v0.3.10
+
+本版本没有修改 Worker 核心状态机或 Coding 行为，因此 Gateway 中显示的 Backend 版本仍应为 v0.3.10。
+
+主要新增：
+
+- 正式 Regression Harness
+- 6 个核心回归场景
+- Deterministic Hard Search Budget 测试
+- Deterministic Validation Tail 测试
+- Edit Failure Recovery 故障注入测试
+- Live Qwen 健康仓库与 Bug Repair 集成测试
+
+最终回归结果：
+
+    6 passed, 0 failed
+
+维护调整：
+
+- healthy_baseline 的 Live Qwen round budget 从 6 调整到 8
+- 修正 Gateway Backend 显示：v0.3.2 -> v0.3.10
+- 强化 Windows 安装和 Cold Restore 文档
+- 增加 WindowsApps Python Alias 排查
+- 增加 py Launcher 缺失场景说明
+- 增加 uv-managed Python 恢复流程
+- 明确灾难恢复时必须重新创建 fresh .venv
+- 增加 Cold Restore 完整验收检查表
+
+灾难恢复验证：
+
+    Cold Disaster Recovery    PASS
+
+已验证恢复链路包括：
+
+- Git clone
+- Fresh Python venv
+- requirements install
+- py_compile
+- core imports
+- relative DEFAULT_WORKSPACE
+- Git runtime hygiene
+- LM Studio /v1/models
+- real Qwen inference
+- MCP stdio / Gateway
+- JSON Coding Worker
+- WorkspaceTools
+- controller permissions
+
+### v0.3.10 — Validation Tail Reserve
 
 
 
