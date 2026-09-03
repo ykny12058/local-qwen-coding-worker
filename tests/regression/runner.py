@@ -1249,6 +1249,844 @@ def run_hard_search_budget() -> ScenarioResult:
             )
 
 
+def run_controller_failure_regression(
+    failure_mode: str,
+) -> ScenarioResult:
+
+    if failure_mode not in {
+        "pytest",
+        "diffcheck",
+    }:
+        raise ValueError(
+            f"Unsupported failure mode: {failure_mode}"
+        )
+
+    if failure_mode == "pytest":
+        name = "controller_pytest_failure"
+        prefix = "qwen_regression_controller_pytest_fail_"
+    else:
+        name = "controller_diffcheck_failure"
+        prefix = "qwen_regression_controller_diffcheck_fail_"
+
+    temp_root = Path(
+        tempfile.mkdtemp(
+            prefix=prefix
+        )
+    ).resolve()
+
+    print()
+    print(
+        f"=== Scenario: {name} ==="
+    )
+    print(
+        f"Workspace: {temp_root}"
+    )
+
+    original_ask_qwen = (
+        worker_module.ask_qwen
+    )
+
+    original_run_tests = (
+        WorkspaceTools.run_tests
+    )
+
+    original_diff_check = (
+        worker_module.run_git_diff_check
+    )
+
+    original_git_diff = (
+        WorkspaceTools.git_diff
+    )
+
+    original_git_status = (
+        WorkspaceTools.git_status
+    )
+
+    injection_state = {
+        "run_tests_calls": 0,
+        "diff_check_calls": 0,
+        "git_diff_calls": 0,
+        "git_status_calls": 0,
+        "injected": False,
+        "stop_checked": False,
+    }
+
+    if failure_mode == "pytest":
+
+        # Qwen path:
+        #
+        # 1 initial COMPLETE pytest -> real fixture failure
+        # 2 read source
+        # 3 replace source
+        #
+        # Controller AUTO:
+        #   COMPLETE pytest -> INJECTED FAILURE
+        #   STOP: no Git validation may execute
+        #
+        # Qwen recovery:
+        # 4 COMPLETE pytest -> real PASS
+        # 5 git diff --check
+        # 6 git diff
+        # 7 git status
+        # 8 finish
+
+        scripted_replies = [
+            (
+                '{"action":"run_tests",'
+                '"args":{"target":""}}'
+            ),
+            (
+                '{"action":"read_file",'
+                '"args":{"relative_path":"src/validator.py"}}'
+            ),
+            (
+                '{"action":"replace_in_file",'
+                '"args":{'
+                '"relative_path":"src/validator.py",'
+                '"old_text":"return quantity >= 0",'
+                '"new_text":"return quantity > 0",'
+                '"expected_count":1'
+                '}}'
+            ),
+            (
+                '{"action":"run_tests",'
+                '"args":{"target":""}}'
+            ),
+            (
+                '{"action":"git_diff_check",'
+                '"args":{}}'
+            ),
+            (
+                '{"action":"git_diff",'
+                '"args":{}}'
+            ),
+            (
+                '{"action":"git_status",'
+                '"args":{}}'
+            ),
+            (
+                '{"action":"finish",'
+                '"status":"changes_complete",'
+                '"summary":"Recovered from injected pytest '
+                'failure and completed validation.",'
+                '"findings":[]}'
+            ),
+        ]
+
+        expected_actions = [
+            "run_tests",
+            "read_file",
+            "replace_in_file",
+            "run_tests",
+            "git_diff_check",
+            "git_diff",
+            "git_status",
+            "finish",
+        ]
+
+    else:
+
+        # Qwen path:
+        #
+        # 1 initial COMPLETE pytest -> real fixture failure
+        # 2 read source
+        # 3 replace source
+        #
+        # Controller AUTO:
+        #   COMPLETE pytest -> PASS
+        #   git diff --check -> INJECTED FAILURE
+        #   STOP: git diff / git status may NOT execute
+        #
+        # Qwen recovery:
+        # 4 git diff --check -> real PASS
+        # 5 git diff
+        # 6 git status
+        # 7 finish
+
+        scripted_replies = [
+            (
+                '{"action":"run_tests",'
+                '"args":{"target":""}}'
+            ),
+            (
+                '{"action":"read_file",'
+                '"args":{"relative_path":"src/validator.py"}}'
+            ),
+            (
+                '{"action":"replace_in_file",'
+                '"args":{'
+                '"relative_path":"src/validator.py",'
+                '"old_text":"return quantity >= 0",'
+                '"new_text":"return quantity > 0",'
+                '"expected_count":1'
+                '}}'
+            ),
+            (
+                '{"action":"git_diff_check",'
+                '"args":{}}'
+            ),
+            (
+                '{"action":"git_diff",'
+                '"args":{}}'
+            ),
+            (
+                '{"action":"git_status",'
+                '"args":{}}'
+            ),
+            (
+                '{"action":"finish",'
+                '"status":"changes_complete",'
+                '"summary":"Recovered from injected diff-check '
+                'failure and completed validation.",'
+                '"findings":[]}'
+            ),
+        ]
+
+        expected_actions = [
+            "run_tests",
+            "read_file",
+            "replace_in_file",
+            "git_diff_check",
+            "git_diff",
+            "git_status",
+            "finish",
+        ]
+
+    scripted_state = {
+        "index": 0,
+    }
+
+    def counted_run_tests(
+        self,
+        *args,
+        **kwargs,
+    ) -> str:
+
+        injection_state[
+            "run_tests_calls"
+        ] += 1
+
+        if (
+            failure_mode == "pytest"
+            and
+            injection_state[
+                "run_tests_calls"
+            ]
+            == 2
+        ):
+            injection_state[
+                "injected"
+            ] = True
+
+            print(
+                "FAULT INJECTION: "
+                "automatic post-change pytest forced to fail"
+            )
+
+            return (
+                "=== REGRESSION INJECTED PYTEST FAILURE ===\n"
+                "1 failed in 0.01s\n"
+                "EXIT CODE: 1"
+            )
+
+        return original_run_tests(
+            self,
+            *args,
+            **kwargs,
+        )
+
+    def counted_diff_check(
+        *args,
+        **kwargs,
+    ):
+
+        injection_state[
+            "diff_check_calls"
+        ] += 1
+
+        if (
+            failure_mode == "diffcheck"
+            and
+            injection_state[
+                "diff_check_calls"
+            ]
+            == 1
+        ):
+            injection_state[
+                "injected"
+            ] = True
+
+            print(
+                "FAULT INJECTION: automatic "
+                "git diff --check forced to fail"
+            )
+
+            return (
+                False,
+                (
+                    "=== REGRESSION INJECTED "
+                    "GIT DIFF CHECK FAILURE ===\n"
+                    "trailing whitespace detected\n"
+                    "EXIT CODE: 1"
+                ),
+            )
+
+        return original_diff_check(
+            *args,
+            **kwargs,
+        )
+
+    def counted_git_diff(
+        self,
+        *args,
+        **kwargs,
+    ) -> str:
+
+        injection_state[
+            "git_diff_calls"
+        ] += 1
+
+        return original_git_diff(
+            self,
+            *args,
+            **kwargs,
+        )
+
+    def counted_git_status(
+        self,
+        *args,
+        **kwargs,
+    ) -> str:
+
+        injection_state[
+            "git_status_calls"
+        ] += 1
+
+        return original_git_status(
+            self,
+            *args,
+            **kwargs,
+        )
+
+    def scripted_ask_qwen(
+        messages: list,
+        max_tokens: int = 850,
+        transport_meta: dict | None = None,
+    ) -> str:
+
+        index = scripted_state[
+            "index"
+        ]
+
+        if index >= len(
+            scripted_replies
+        ):
+            raise RuntimeError(
+                "Scripted model was called more "
+                "times than expected."
+            )
+
+        # ----------------------------------------------------
+        # index == 3 means the Worker has completed the
+        # successful replacement AND returned from the
+        # automatic Controller pipeline.
+        #
+        # We inspect counters BEFORE giving Qwen its recovery
+        # action. This proves fail-stop behavior at the exact
+        # control-transfer boundary.
+        # ----------------------------------------------------
+
+        if index == 3:
+
+            if not injection_state[
+                "injected"
+            ]:
+                raise RuntimeError(
+                    "Expected failure injection "
+                    "did not fire before Qwen recovery."
+                )
+
+            if failure_mode == "pytest":
+
+                if (
+                    injection_state[
+                        "run_tests_calls"
+                    ]
+                    != 2
+                ):
+                    raise RuntimeError(
+                        "Unexpected pytest call count at "
+                        "pytest failure boundary: "
+                        f"{injection_state['run_tests_calls']}"
+                    )
+
+                if (
+                    injection_state[
+                        "diff_check_calls"
+                    ]
+                    != 0
+                    or
+                    injection_state[
+                        "git_diff_calls"
+                    ]
+                    != 0
+                    or
+                    injection_state[
+                        "git_status_calls"
+                    ]
+                    != 0
+                ):
+                    raise RuntimeError(
+                        "Controller continued into Git "
+                        "validation after pytest failure: "
+                        f"{injection_state}"
+                    )
+
+            else:
+
+                if (
+                    injection_state[
+                        "run_tests_calls"
+                    ]
+                    != 2
+                ):
+                    raise RuntimeError(
+                        "Expected initial + automatic pytest "
+                        "before diff-check failure; observed "
+                        f"{injection_state['run_tests_calls']}."
+                    )
+
+                if (
+                    injection_state[
+                        "diff_check_calls"
+                    ]
+                    != 1
+                ):
+                    raise RuntimeError(
+                        "Unexpected diff-check call count at "
+                        "failure boundary: "
+                        f"{injection_state['diff_check_calls']}"
+                    )
+
+                if (
+                    injection_state[
+                        "git_diff_calls"
+                    ]
+                    != 0
+                    or
+                    injection_state[
+                        "git_status_calls"
+                    ]
+                    != 0
+                ):
+                    raise RuntimeError(
+                        "Controller continued into git diff "
+                        "or git status after diff-check "
+                        f"failure: {injection_state}"
+                    )
+
+            injection_state[
+                "stop_checked"
+            ] = True
+
+            print(
+                "FAIL-STOP BOUNDARY: PASS"
+            )
+
+        scripted_state[
+            "index"
+        ] += 1
+
+        if transport_meta is not None:
+            transport_meta.update(
+                {
+                    "transport": "scripted",
+                    "time_to_headers_seconds": 0.0,
+                    "time_to_first_chunk_seconds": 0.0,
+                    "total_inference_time_seconds": 0.0,
+                    "inference_time_seconds": 0.0,
+                }
+            )
+
+        return scripted_replies[
+            index
+        ]
+
+    try:
+        init_git_repo(
+            temp_root
+        )
+
+        create_single_bug_fixture(
+            temp_root
+        )
+
+        initial_test = run_command(
+            [
+                str(
+                    Path(
+                        os.sys.executable
+                    )
+                ),
+                "-m",
+                "pytest",
+                "-q",
+            ],
+            temp_root,
+        )
+
+        if initial_test.returncode == 0:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Bug fixture unexpectedly passed "
+                    "before Worker execution."
+                ),
+            )
+
+        print(
+            "Failing fixture confirmed: PASS"
+        )
+
+        commit_baseline(
+            temp_root
+        )
+
+        worker_module.ask_qwen = (
+            scripted_ask_qwen
+        )
+
+        WorkspaceTools.run_tests = (
+            counted_run_tests
+        )
+
+        worker_module.run_git_diff_check = (
+            counted_diff_check
+        )
+
+        WorkspaceTools.git_diff = (
+            counted_git_diff
+        )
+
+        WorkspaceTools.git_status = (
+            counted_git_status
+        )
+
+        worker_result = run_json_worker(
+            task=(
+                "Fix the failing quantity validation bug. "
+                "Zero must be invalid. Make only the minimal "
+                "source change. If deterministic validation "
+                "fails, recover using the returned evidence "
+                "and complete all mandatory validation."
+            ),
+            workspace_path=str(
+                temp_root
+            ),
+            max_rounds=10,
+            allow_write=True,
+            allow_run=True,
+        )
+
+        print()
+        print(
+            "--- Worker Result ---"
+        )
+        print(
+            worker_result
+        )
+
+        if not injection_state[
+            "injected"
+        ]:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Fault injection was never triggered."
+                ),
+            )
+
+        if not injection_state[
+            "stop_checked"
+        ]:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Fail-stop boundary was never observed "
+                    "before Qwen recovery."
+                ),
+            )
+
+        if (
+            scripted_state[
+                "index"
+            ]
+            != len(
+                scripted_replies
+            )
+        ):
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Unexpected scripted model call count: "
+                    f"{scripted_state['index']} / "
+                    f"{len(scripted_replies)}."
+                ),
+            )
+
+        try:
+            payload = json.loads(
+                worker_result
+            )
+        except json.JSONDecodeError as exc:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Worker result was not valid JSON: "
+                    f"{exc}"
+                ),
+            )
+
+        if (
+            payload.get(
+                "controller_validation"
+            )
+            != "PASS"
+        ):
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Final controller validation "
+                    "did not PASS."
+                ),
+            )
+
+        if (
+            payload.get("status")
+            != "changes_complete"
+        ):
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Expected final status "
+                    "changes_complete, got "
+                    f"{payload.get('status')!r}."
+                ),
+            )
+
+        actions = [
+            item.get("action")
+            for item in payload.get(
+                "action_trace",
+                [],
+            )
+        ]
+
+        if actions != expected_actions:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Unexpected Qwen action sequence.\n"
+                    f"Expected: {expected_actions}\n"
+                    f"Observed: {actions}"
+                ),
+            )
+
+        # ----------------------------------------------------
+        # Final exact call counts prove recovery happened only
+        # after Controller returned control to Qwen.
+        # ----------------------------------------------------
+
+        if failure_mode == "pytest":
+
+            expected_counts = {
+                "run_tests_calls": 3,
+                "diff_check_calls": 1,
+                "git_diff_calls": 1,
+                "git_status_calls": 1,
+            }
+
+        else:
+
+            expected_counts = {
+                "run_tests_calls": 2,
+                "diff_check_calls": 2,
+                "git_diff_calls": 1,
+                "git_status_calls": 1,
+            }
+
+        for key, expected in expected_counts.items():
+
+            observed = injection_state[
+                key
+            ]
+
+            if observed != expected:
+                return ScenarioResult(
+                    name=name,
+                    passed=False,
+                    detail=(
+                        f"Unexpected {key}: "
+                        f"expected {expected}, "
+                        f"observed {observed}."
+                    ),
+                )
+
+        validator = (
+            temp_root
+            / "src"
+            / "validator.py"
+        )
+
+        final_source = validator.read_text(
+            encoding="utf-8"
+        )
+
+        if (
+            "return quantity > 0"
+            not in final_source
+        ):
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Expected validator fix "
+                    "was not present."
+                ),
+            )
+
+        final_test = run_command(
+            [
+                str(
+                    Path(
+                        os.sys.executable
+                    )
+                ),
+                "-m",
+                "pytest",
+                "-q",
+            ],
+            temp_root,
+        )
+
+        if final_test.returncode != 0:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Final external pytest failed.\n"
+                    f"stdout:\n{final_test.stdout}\n"
+                    f"stderr:\n{final_test.stderr}"
+                ),
+            )
+
+        status_after = get_git_status(
+            temp_root
+        )
+
+        status_lines = [
+            line.strip()
+            for line in status_after.splitlines()
+            if line.strip()
+        ]
+
+        if status_lines != [
+            "M src/validator.py"
+        ]:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Unexpected final Git state:\n"
+                    f"{status_after}"
+                ),
+            )
+
+        if failure_mode == "pytest":
+            detail = (
+                "Injected automatic pytest failure stopped "
+                "the Controller before all Git validation; "
+                "Qwen regained control, recovered, and "
+                "completed validation successfully."
+            )
+        else:
+            detail = (
+                "Injected automatic diff-check failure "
+                "stopped the Controller before git diff and "
+                "git status; Qwen regained control, recovered, "
+                "and completed validation successfully."
+            )
+
+        return ScenarioResult(
+            name=name,
+            passed=True,
+            detail=detail,
+        )
+
+    except Exception as exc:
+        return ScenarioResult(
+            name=name,
+            passed=False,
+            detail=(
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+
+    finally:
+        worker_module.ask_qwen = (
+            original_ask_qwen
+        )
+
+        WorkspaceTools.run_tests = (
+            original_run_tests
+        )
+
+        worker_module.run_git_diff_check = (
+            original_diff_check
+        )
+
+        WorkspaceTools.git_diff = (
+            original_git_diff
+        )
+
+        WorkspaceTools.git_status = (
+            original_git_status
+        )
+
+        cleanup_ok = cleanup_workspace(
+            temp_root
+        )
+
+        if cleanup_ok:
+            print(
+                "Cleanup: PASS"
+            )
+        else:
+            print(
+                "Cleanup: FAIL"
+            )
+
+
+def run_controller_pytest_failure() -> ScenarioResult:
+    return run_controller_failure_regression(
+        "pytest"
+    )
+
+
+def run_controller_diffcheck_failure() -> ScenarioResult:
+    return run_controller_failure_regression(
+        "diffcheck"
+    )
+
+
 def run_validation_tail() -> ScenarioResult:
     name = "validation_tail"
 
@@ -1274,16 +2112,23 @@ def run_validation_tail() -> ScenarioResult:
     # Base 2: read current source
     # Base 3: perform the fix
     #
-    # The base budget is then exhausted while mandatory
-    # post-change validation is still outstanding.
+    # The successful replacement must immediately trigger
+    # Controller-driven post-change validation INSIDE Base 3:
     #
-    # Validation Tail must therefore provide:
+    # complete pytest
+    # -> git diff --check
+    # -> git diff
+    # -> git status
     #
-    # Tail 1: COMPLETE pytest
-    # Tail 2: git diff --check
-    # Tail 3: git diff
-    # Tail 4: git status
-    # Tail 5: finish(changes_complete)
+    # The base coding budget is then exhausted.
+    # Validation Tail must require only the final Qwen finish.
+    #
+    # Therefore exactly four model calls are expected:
+    #
+    # 1 run_tests
+    # 2 read_file
+    # 3 replace_in_file
+    # 4 finish
 
     scripted_replies = [
         (
@@ -1304,26 +2149,10 @@ def run_validation_tail() -> ScenarioResult:
             '}}'
         ),
         (
-            '{"action":"run_tests",'
-            '"args":{"target":""}}'
-        ),
-        (
-            '{"action":"git_diff_check",'
-            '"args":{}}'
-        ),
-        (
-            '{"action":"git_diff",'
-            '"args":{}}'
-        ),
-        (
-            '{"action":"git_status",'
-            '"args":{}}'
-        ),
-        (
             '{"action":"finish",'
             '"status":"changes_complete",'
             '"summary":"Fixed quantity validation and '
-            'completed mandatory validation.",'
+            'completed controller-driven validation.",'
             '"findings":[]}'
         ),
     ]
@@ -1484,10 +2313,6 @@ def run_validation_tail() -> ScenarioResult:
             "run_tests",
             "read_file",
             "replace_in_file",
-            "run_tests",
-            "git_diff_check",
-            "git_diff",
-            "git_status",
             "finish",
         ]
 
@@ -1515,12 +2340,12 @@ def run_validation_tail() -> ScenarioResult:
             [],
         )
 
-        if len(telemetry) != 8:
+        if len(telemetry) != 4:
             return ScenarioResult(
                 name=name,
                 passed=False,
                 detail=(
-                    "Expected exactly eight telemetry "
+                    "Expected exactly four telemetry "
                     "records, observed "
                     f"{len(telemetry)}."
                 ),
@@ -1558,53 +2383,51 @@ def run_validation_tail() -> ScenarioResult:
                     ),
                 )
 
-        # Remaining five requests must be Validation Tail
-        # rounds 1 through 5.
+        # Exactly one request remains after the base budget:
+        # final finish in Validation Tail round 1.
         tail_telemetry = telemetry[3:]
 
-        if len(tail_telemetry) != 5:
+        if len(tail_telemetry) != 1:
             return ScenarioResult(
                 name=name,
                 passed=False,
                 detail=(
-                    "Expected exactly five Validation Tail "
-                    "telemetry records, observed "
+                    "Expected exactly one Validation Tail "
+                    "telemetry record, observed "
                     f"{len(tail_telemetry)}."
                 ),
             )
 
-        for tail_round, item in enumerate(
-            tail_telemetry,
-            start=1,
-        ):
-            if (
-                item.get("phase")
-                != "validation_tail"
-            ):
-                return ScenarioResult(
-                    name=name,
-                    passed=False,
-                    detail=(
-                        "Post-budget request was not marked "
-                        "phase=validation_tail."
-                    ),
-                )
+        tail_item = tail_telemetry[0]
 
-            if (
-                item.get(
-                    "validation_tail_round"
-                )
-                != tail_round
-            ):
-                return ScenarioResult(
-                    name=name,
-                    passed=False,
-                    detail=(
-                        "Unexpected validation tail round: "
-                        f"expected {tail_round}, got "
-                        f"{item.get('validation_tail_round')}."
-                    ),
-                )
+        if (
+            tail_item.get("phase")
+            != "validation_tail"
+        ):
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Final finish request was not marked "
+                    "phase=validation_tail."
+                ),
+            )
+
+        if (
+            tail_item.get(
+                "validation_tail_round"
+            )
+            != 1
+        ):
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Expected final finish in Validation Tail "
+                    "round 1, got "
+                    f"{tail_item.get('validation_tail_round')}."
+                ),
+            )
 
         # -------------------------------------------------
         # Validation state must prove the whole chain.
@@ -1749,12 +2572,12 @@ def run_validation_tail() -> ScenarioResult:
                 ),
             )
 
-        if scripted_state["index"] != 8:
+        if scripted_state["index"] != 4:
             return ScenarioResult(
                 name=name,
                 passed=False,
                 detail=(
-                    "Expected exactly eight scripted "
+                    "Expected exactly four scripted "
                     "model calls, observed "
                     f"{scripted_state['index']}."
                 ),
@@ -1764,10 +2587,11 @@ def run_validation_tail() -> ScenarioResult:
             name=name,
             passed=True,
             detail=(
-                "Base coding budget expired immediately "
-                "after the source fix; Validation Tail then "
-                "completed pytest, diff-check, diff, status, "
-                "and finish in the required order."
+                "Successful source replacement triggered "
+                "Controller-driven pytest and Git validation "
+                "without extra LLM rounds; after the base "
+                "budget expired, Validation Tail required "
+                "only the final Qwen finish."
             ),
         )
 
@@ -2194,6 +3018,14 @@ def main() -> int:
 
     results.append(
         run_validation_tail()
+    )
+
+    results.append(
+        run_controller_pytest_failure()
+    )
+
+    results.append(
+        run_controller_diffcheck_failure()
     )
 
     return print_summary(

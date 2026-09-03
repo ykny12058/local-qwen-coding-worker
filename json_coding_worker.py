@@ -2489,6 +2489,226 @@ def execute_action(
 # Round Guidance
 # ============================================================
 
+
+# ============================================================
+# Controller-Driven Post-Change Validation
+# ============================================================
+
+def run_controller_post_change_validation(
+    tools: WorkspaceTools,
+    state: WorkerState,
+    task: str,
+    initial_result: str,
+) -> tuple[bool, str]:
+    """
+    Run deterministic validation immediately after one successful
+    source replacement.
+
+    This helper orchestrates existing action-executor handlers.
+    It does not duplicate pytest/Git state-update logic and it
+    never auto-generates the final finish action.
+    """
+
+    evidence_parts = [
+        initial_result,
+    ]
+
+    allowed_actions = {
+        "run_tests",
+        "git_diff_check",
+        "git_diff",
+        "git_status",
+    }
+
+    # Exactly four deterministic validation actions can exist:
+    #
+    # complete pytest
+    # -> git diff --check
+    # -> git diff
+    # -> git status
+    #
+    # The final finish action always remains Qwen-controlled.
+    for _ in range(4):
+
+        expected = (
+            validation_tail_expected_action(
+                state
+            )
+        )
+
+        if expected == "finish":
+
+            evidence_parts.append(
+                (
+                    "CONTROLLER POST-CHANGE VALIDATION: PASS\n"
+                    "Complete pytest and all required Git "
+                    "validation steps completed.\n"
+                    "Controller did NOT auto-finish. "
+                    "Qwen must submit the final finish action."
+                )
+            )
+
+            return (
+                False,
+                "\n\n".join(
+                    evidence_parts
+                ),
+            )
+
+        if expected is None:
+
+            if (
+                state.full_tests_run
+                and not state.full_tests_passed
+            ):
+
+                stop_reason = (
+                    "CONTROLLER POST-CHANGE VALIDATION: STOP\n"
+                    "Complete pytest failed. "
+                    "Automatic Git validation was not continued. "
+                    "Return control to Qwen for debugging."
+                )
+
+            elif (
+                state.git_diff_check_seen
+                and not state.git_diff_check_passed
+            ):
+
+                stop_reason = (
+                    "CONTROLLER POST-CHANGE VALIDATION: STOP\n"
+                    "git diff --check failed. "
+                    "Automatic git diff / git status were not "
+                    "continued. changes_complete is not permitted."
+                )
+
+            else:
+
+                stop_reason = (
+                    "CONTROLLER POST-CHANGE VALIDATION: "
+                    "INTERNAL STOP\n"
+                    "Validation planner returned no deterministic "
+                    "next action. Return control to Qwen."
+                )
+
+            evidence_parts.append(
+                stop_reason
+            )
+
+            return (
+                False,
+                "\n\n".join(
+                    evidence_parts
+                ),
+            )
+
+        if expected not in allowed_actions:
+
+            evidence_parts.append(
+                (
+                    "CONTROLLER POST-CHANGE VALIDATION: "
+                    "INTERNAL STOP\n"
+                    f"Unexpected deterministic action: "
+                    f"{expected!r}. "
+                    "No automatic continuation was performed."
+                )
+            )
+
+            return (
+                False,
+                "\n\n".join(
+                    evidence_parts
+                ),
+            )
+
+        action_data = {
+            "action": expected,
+            "args": (
+                {
+                    "target": "",
+                }
+                if expected == "run_tests"
+                else {}
+            ),
+        }
+
+        step_finished, step_result = (
+            execute_action(
+                tools,
+                action_data,
+                state,
+                task,
+            )
+        )
+
+        evidence_parts.append(
+            (
+                "CONTROLLER AUTO VALIDATION STEP: "
+                f"{expected}\n"
+                f"{step_result}"
+            )
+        )
+
+        if step_finished:
+
+            evidence_parts.append(
+                (
+                    "CONTROLLER POST-CHANGE VALIDATION: "
+                    "INTERNAL STOP\n"
+                    "A deterministic validation action "
+                    "unexpectedly marked the Worker finished. "
+                    "Automatic continuation stopped."
+                )
+            )
+
+            return (
+                False,
+                "\n\n".join(
+                    evidence_parts
+                ),
+            )
+
+    final_expected = (
+        validation_tail_expected_action(
+            state
+        )
+    )
+
+    if final_expected == "finish":
+
+        evidence_parts.append(
+            (
+                "CONTROLLER POST-CHANGE VALIDATION: PASS\n"
+                "Complete pytest and all required Git "
+                "validation steps completed.\n"
+                "Controller did NOT auto-finish. "
+                "Qwen must submit the final finish action."
+            )
+        )
+
+        return (
+            False,
+            "\n\n".join(
+                evidence_parts
+            ),
+        )
+
+    evidence_parts.append(
+        (
+            "CONTROLLER POST-CHANGE VALIDATION: INTERNAL STOP\n"
+            "Deterministic validation exceeded its fixed "
+            "four-step budget without reaching finish-ready "
+            "state. Automatic continuation stopped."
+        )
+    )
+
+    return (
+        False,
+        "\n\n".join(
+            evidence_parts
+        ),
+    )
+
+
 def build_round_guidance(
     task: str,
     round_number: int,
@@ -3251,7 +3471,7 @@ def run_json_worker(
     allow_run: bool = False,
 ) -> str:
     """
-    Local Qwen JSON Coding Worker v0.3.12
+    Local Qwen JSON Coding Worker v0.3.13
 
     Hard permissions:
     - allow_write=False blocks source modifications.
@@ -4005,6 +4225,10 @@ def run_json_worker(
 
             else:
 
+                modification_count_before = (
+                    state.modification_count
+                )
+
                 finished, result = (
                     execute_action(
                         tools,
@@ -4013,6 +4237,25 @@ def run_json_worker(
                         task,
                     )
                 )
+
+                successful_source_change = (
+                    action == "replace_in_file"
+                    and not finished
+                    and state.modification_count
+                    == modification_count_before + 1
+                    and state.change_needs_test
+                )
+
+                if successful_source_change:
+
+                    finished, result = (
+                        run_controller_post_change_validation(
+                            tools,
+                            state,
+                            task,
+                            result,
+                        )
+                    )
 
         except Exception as exc:
 
@@ -4417,7 +4660,7 @@ if __name__ == "__main__":
     )
 
     print(
-        "Local Qwen JSON Coding Worker v0.3.12"
+        "Local Qwen JSON Coding Worker v0.3.13"
     )
 
     print(

@@ -1,175 +1,79 @@
-@'
+# Regression Harness
 
-from pathlib import Path
+Regression coverage for the Local Qwen Coding Worker Controller and live Qwen integration.
 
+## Purpose
 
+The harness protects Controller behavior against regressions while keeping deterministic Controller tests separate from model-dependent integration tests.
 
-path = Path(
-
-&#x20;   r"D:\\LocalQwenWorker\\tests\\regression\\README.md"
-
-)
-
-
-
-content = """# Regression Harness
-
-
-
-Regression coverage for the Local Qwen Coding Worker controller and live Qwen integration.
-
-
-
-\## Purpose
-
-
-
-The harness protects controller behavior against regressions while keeping deterministic controller tests separate from model-dependent integration tests.
-
-
-
-\## Scenarios
-
-
+## Scenarios
 
 | Scenario | Type | Purpose |
-
 | --- | --- | --- |
+| `bootstrap` | Deterministic | Verifies isolated temporary Git repository setup and cleanup. |
+| `healthy_baseline` | Live Qwen integration | Verifies healthy-project convergence without unnecessary Git validation. |
+| `single_validator_bug` | Live Qwen integration | Verifies minimal source repair and the complete modified-path validation workflow. |
+| `edit_failure_recovery` | Live Qwen + fault injection | Verifies read-refresh recovery after a deterministically rejected replacement. |
+| `hard_search_budget` | Deterministic scripted Controller test | Verifies enforcement of the investigation/search budget. |
+| `validation_tail` | Deterministic scripted Controller test | Verifies successful Controller-driven validation followed by Qwen-owned final finish in Validation Tail. |
+| `controller_pytest_failure` | Deterministic fault injection | Verifies that automatic post-change pytest failure stops before Git validation and returns control to Qwen. |
+| `controller_diffcheck_failure` | Deterministic fault injection | Verifies that automatic `git diff --check` failure stops before `git diff` and `git status` and returns control to Qwen. |
 
-| `bootstrap` | Deterministic | Creates an isolated temporary Git repository and verifies sandbox setup and cleanup. |
+## Controller-Driven Post-Change Validation
 
-| `healthy\_baseline` | Live Qwen integration | Verifies that a healthy repository remains unchanged and complete pytest validation succeeds. |
-
-| `single\_validator\_bug` | Live Qwen integration | Verifies that Qwen can diagnose and minimally repair a simple source bug, then complete mandatory validation. |
-
-| `edit\_failure\_recovery` | Live Qwen + fault injection | Forces the first replacement attempt to fail and verifies that the worker re-reads the current file before rebuilding the edit. |
-
-| `hard\_search\_budget` | Deterministic scripted controller test | Verifies that the controller closes the search phase after the configured investigation budget is exhausted. |
-
-| `validation\_tail` | Deterministic scripted controller test | Verifies that an exhausted base coding budget can continue only through the mandatory validation-only tail. |
-
-
-
-\## Validation Tail Contract
-
-
-
-After a successful source modification, the validation-only tail permits the remaining mandatory sequence:
-
-
+After a successful source modification, the Controller may automatically execute:
 
 ```text
-
-COMPLETE pytest
-
-\-> git diff --check
-
-\-> git diff
-
-\-> git status
-
-\-> finish(status="changes\_complete")
-
-Investigation, file reads, directory listing, search, and source modification are not permitted to consume validation-tail rounds.
-
+complete pytest
+-> git diff --check
+-> git diff
+-> git status
+This pipeline is fail-closed.
+If complete pytest fails:
+STOP
+-> return evidence to Qwen
+No automatic Git validation follows.
+If git diff --check fails:
+STOP
+-> return evidence to Qwen
+No automatic git diff or git status follows.
+The Controller never auto-submits finish.
+Final completion remains Qwen-owned and continues to pass through the existing finish hard gate.
+Validation Tail
+Validation Tail remains a validation-only reserve rather than additional debugging time.
+When Controller-driven pytest and Git validation have already succeeded, an exhausted base coding budget requires only the final Qwen finish action in the tail.
 Running the Full Suite
-
 From the project root:
-
-.\\\\.venv\\\\Scripts\\\\python.exe .\\\\tests\\\\regression\\\\runner.py
-
-Expected stable baseline:
-
-6 passed, 0 failed
-
+.\.venv\Scripts\python.exe .\tests\regression\runner.py
+Current stable baseline:
+8 passed, 0 failed
 Test Layers
-
-The suite deliberately contains two categories.
-
 Deterministic Controller Regression
-
-These tests do not depend on real model behavior:
-
-\- bootstrap
-
-\- hard\_search\_budget
-
-\- validation\_tail
-
-Scripted model responses are used where necessary to exercise exact controller state transitions.
-
+- bootstrap
+- hard_search_budget
+- validation_tail
+- controller_pytest_failure
+- controller_diffcheck_failure
 Live Qwen Integration
-
-These tests exercise the real local model:
-
-\- healthy\_baseline
-
-\- single\_validator\_bug
-
-\- edit\_failure\_recovery
-
-LM Studio must therefore be running and exposing the configured OpenAI-compatible endpoint and model.
-
-Live-model action paths may vary between runs. Assertions focus on final correctness, safety, and controller validation rather than requiring an unnecessarily rigid reasoning path.
-
+- healthy_baseline
+- single_validator_bug
+- edit_failure_recovery
+LM Studio must be running and exposing the configured OpenAI-compatible endpoint and model for live scenarios.
 Isolation
-
 Every scenario creates its own temporary Git repository.
-
 The harness must not modify the production project workspace.
-
-Temporary repositories are removed after each scenario, including Windows read-only Git objects.
-
-Current Stable Baseline
-
-The first complete regression baseline covers:
-
-\- clean-project recognition
-
-\- minimal bug repair
-
-\- complete pytest enforcement
-
-\- edit failure recovery
-
-\- hard investigation/search budget
-
-\- post-edit validation
-
-\- Git validation
-
-\- validation-tail continuation
-
-\- controller finish gates
-
-&#x20; """
-
-path.parent.mkdir(
-
-&#x20;   parents=True,
-
-&#x20;   exist\_ok=True,
-
-)
-
-path.write\_text(
-
-&#x20;   content,
-
-&#x20;   encoding="utf-8",
-
-)
-
-print("REGRESSION README: PASS")
-
-'@ | ..venv\\Scripts\\python.exe -
-
-
-
-应该：
-
-
-
-```text
-
-REGRESSION README: PASS
+Current Stable Coverage
+The suite covers:
+- clean-project recognition
+- Lean Healthy convergence
+- minimal bug repair
+- complete pytest enforcement
+- edit failure recovery
+- hard investigation/search budget
+- Controller-driven post-change validation
+- pytest fail-stop behavior
+- git diff --check fail-stop behavior
+- Git finalization
+- Validation Tail continuation
+- Qwen-owned final finish
+- Controller finish gates

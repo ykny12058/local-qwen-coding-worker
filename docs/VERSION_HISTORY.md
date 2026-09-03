@@ -4,6 +4,32 @@
 
 \## 当前稳定版本
 
+### v0.3.13 — Controller-Driven Post-Change Validation
+
+This release moves deterministic post-change validation from separate LLM rounds into the Python Controller while preserving the existing validation requirements.
+
+Main changes:
+
+- After a successful `replace_in_file`, the Controller automatically executes complete pytest, `git diff --check`, `git diff`, and `git status`.
+- Automatic validation reuses the existing Controller action execution and state machine.
+- A post-change pytest failure stops the automatic pipeline immediately and returns evidence to Qwen.
+- A `git diff --check` failure stops before automatic `git diff` and `git status`.
+- The Controller never auto-submits `finish`.
+- Final `finish` remains Qwen-owned and continues to pass through the existing finish hard gate.
+- Read Refresh Recovery remains compatible with post-change pytest validation.
+- Regression coverage expands from 6 to 8 scenarios with `controller_pytest_failure` and `controller_diffcheck_failure`.
+
+Regression result:
+
+    8 passed, 0 failed
+
+Measured A/B result on the same `single_validator_bug` modified-path regression:
+
+    v0.3.12: 9 LLM rounds
+    v0.3.13: 5 LLM rounds
+
+This reduces the measured path by 4 LLM rounds, or 44.4%. This measurement applies to this regression scenario and is not a fixed performance claim for all tasks.
+
 ### v0.3.12 — Lean Healthy Convergence
 
 本版本优化健康、未修改仓库的 Agent 收敛行为，并将 JSON Coding Worker 核心版本提升至 v0.3.12。

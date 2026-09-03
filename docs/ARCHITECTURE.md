@@ -432,3 +432,30 @@ Validation Tail 不是额外 Debug 时间。
 
 未来可以将这些功能拆到独立 runtime/config 模块中。
 
+\## 14. Controller-Driven Post-Change Validation
+
+Starting with v0.3.13, a successful source replacement can trigger deterministic post-change validation directly inside the Python Controller.
+
+The sequence is:
+
+```text
+successful replace_in_file
+-> complete pytest
+-> git diff --check
+-> git diff
+-> git status
+-> return validation evidence to Qwen
+-> Qwen submits finish
+```
+
+The Controller reuses the existing action execution and state machine rather than implementing a second validation path.
+
+Fail-stop rules:
+
+- If post-change pytest fails, automatic validation stops immediately and the evidence is returned to Qwen.
+- If `git diff --check` fails, automatic validation stops before `git diff` and `git status`.
+- The Controller never auto-submits `finish`.
+- Final `finish` remains Qwen-owned and continues to pass through the existing finish hard gate.
+- Read Refresh Recovery remains active after post-change complete pytest.
+
+Validation Tail remains available when the base coding budget is exhausted. If Controller-driven mechanical validation has already succeeded, the tail requires only the final Qwen `finish` action.
