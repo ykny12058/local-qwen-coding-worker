@@ -4,6 +4,28 @@
 
 \## 当前稳定版本
 
+### v0.3.12 — Lean Healthy Convergence
+
+本版本优化健康、未修改仓库的 Agent 收敛行为，并将 JSON Coding Worker 核心版本提升至 v0.3.12。
+
+主要变化：
+
+- 新增 Lean Healthy Convergence guidance
+- 完整 pytest 已通过、源码未修改且当前源码/测试证据充分时，Worker 优先以 healthy 状态结束
+- 避免仅用于 reassurance 的额外 search 与 Git 检查
+- 保留最小必要调查能力，不强制固定 Action Trace
+- 新增 Healthy efficiency regression guard
+- Guard 要求最终 Action 为 finish
+- Healthy 未修改路径不得执行 git diff --check、git diff、git status
+- Healthy 路径最多允许 6 个 LLM rounds
+- 实测 Healthy baseline 从 8 rounds 收敛至 5 rounds，减少 37.5%
+
+Modified-source 安全验证流程保持不变：
+
+- source modification -> complete pytest -> git diff --check -> git diff -> git status -> finish
+
+完整 Regression Harness：6 passed, 0 failed
+
 
 
 \### v0.3.11 — Maintenance / Regression Baseline

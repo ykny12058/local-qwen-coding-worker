@@ -1935,6 +1935,83 @@ def run_healthy_baseline() -> ScenarioResult:
                 ),
             )
 
+        try:
+            worker_data = json.loads(
+                worker_result
+            )
+        except json.JSONDecodeError:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Lean Healthy regression: "
+                    "Worker result was not valid JSON."
+                ),
+            )
+
+        actions = [
+            item.get("action")
+            for item in worker_data.get("action_trace", [])
+            if isinstance(item, dict)
+        ]
+
+        if not actions:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Lean Healthy regression: "
+                    "Worker result had no action_trace."
+                ),
+            )
+
+        if actions[-1] != "finish":
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Lean Healthy regression: "
+                    "healthy path did not end with finish. "
+                    f"Trace: {actions}"
+                ),
+            )
+
+        forbidden_git_actions = {
+            "git_diff_check",
+            "git_diff",
+            "git_status",
+        }
+
+        unexpected_git_actions = [
+            action
+            for action in actions
+            if action in forbidden_git_actions
+        ]
+
+        if unexpected_git_actions:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Lean Healthy regression: "
+                    "unmodified healthy path performed "
+                    "unnecessary Git reassurance actions: "
+                    f"{unexpected_git_actions}. "
+                    f"Trace: {actions}"
+                ),
+            )
+
+        if len(actions) > 6:
+            return ScenarioResult(
+                name=name,
+                passed=False,
+                detail=(
+                    "Lean Healthy regression: "
+                    "healthy path exceeded 6 LLM rounds. "
+                    f"Trace: {actions}"
+                ),
+            )
+
         return ScenarioResult(
             name=name,
             passed=True,

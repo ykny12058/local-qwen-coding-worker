@@ -2670,6 +2670,26 @@ def build_round_guidance(
         )
 
     # ========================================================
+    # Lean Healthy convergence
+    # ========================================================
+
+    if (
+        state.allow_run
+        and task_looks_test_related(task)
+        and state.full_tests_run
+        and state.full_tests_passed
+        and not state.modified
+    ):
+        lines.append(
+            (
+                "CONVERGENCE GUIDANCE: Complete pytest passes and no source modification has occurred. "
+                "If enough CURRENT source/test evidence has already been inspected, finish now with status=healthy. "
+                "If evidence is still missing, inspect only the smallest missing evidence. "
+                "Do not perform additional search or git checks merely for reassurance."
+            )
+        )
+
+    # ========================================================
     # Investigation convergence / hard search phase gate
     # ========================================================
 
@@ -3231,7 +3251,7 @@ def run_json_worker(
     allow_run: bool = False,
 ) -> str:
     """
-    Local Qwen JSON Coding Worker v0.3.10
+    Local Qwen JSON Coding Worker v0.3.12
 
     Hard permissions:
     - allow_write=False blocks source modifications.
@@ -4397,7 +4417,7 @@ if __name__ == "__main__":
     )
 
     print(
-        "Local Qwen JSON Coding Worker v0.3.10"
+        "Local Qwen JSON Coding Worker v0.3.12"
     )
 
     print(

@@ -486,7 +486,7 @@ def delegate_coding_task(
 
         return (
             "=== LOCAL QWEN JSON CODING WORKER ===\n"
-            "Backend: json_coding_worker v0.3.10\n"
+            "Backend: json_coding_worker v0.3.12\n"
             f"Mode: {normalized_mode}\n"
             f"Max rounds: {rounds}\n"
             f"allow_write: {bool(allow_write)}\n"
