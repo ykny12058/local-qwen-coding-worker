@@ -70,6 +70,11 @@ MIN_EVIDENCE_CHARS = 8
 MAX_UNIQUE_SEARCHES_PER_GENERATION = 4
 MAX_NO_PROGRESS_BEFORE_SEARCH_LOCK = 4
 
+# Controller-assisted search evidence acquisition is deliberately
+# bounded. These are safety limits, not performance-optimal values.
+MAX_SEARCH_EVIDENCE_FILES = 3
+MAX_SEARCH_EVIDENCE_CHARS = 8000
+
 # If the base round budget expires after a successful source edit,
 # reserve a small validation-only tail. Five actions are normally
 # required (pytest, diff-check, diff, status, finish); six rounds
@@ -1607,6 +1612,243 @@ def validate_finish_payload(
 
 
 # ============================================================
+# Search-Driven Evidence Acquisition
+# ============================================================
+
+def parse_search_result_candidate_paths(
+    result: str,
+) -> list[str] | None:
+    """
+    Parse the deterministic search_code result format:
+
+        relative/path.py:line_number: source text
+
+    All non-empty result lines must match the expected format.
+    Paths are canonicalized to forward slashes at the bridge
+    boundary so read/edit state uses the model-facing path form.
+    """
+
+    if not isinstance(
+        result,
+        str,
+    ):
+        return None
+
+    lines = [
+        line
+        for line in result.splitlines()
+        if line.strip()
+    ]
+
+    if not lines:
+        return None
+
+    paths: list[str] = []
+
+    for line in lines:
+
+        match = re.match(
+            r"^(.+?):(\d+):(?:\s|$)",
+            line,
+        )
+
+        if match is None:
+            return None
+
+        relative_path = (
+            match.group(1)
+            .strip()
+            .replace("\\", "/")
+        )
+
+        if not relative_path:
+            return None
+
+        if relative_path not in paths:
+
+            paths.append(
+                relative_path
+            )
+
+            if len(paths) > (
+                MAX_SEARCH_EVIDENCE_FILES
+            ):
+                return None
+
+    return paths
+
+
+def acquire_search_result_evidence(
+    tools: WorkspaceTools,
+    state: WorkerState,
+    task: str,
+    search_result: str,
+) -> str | None:
+    """
+    For a bounded writable test/debug search, mechanically acquire
+    CURRENT authoritative file evidence without consuming another
+    LLM round.
+
+    Actual read_file actions remain responsible for satisfying the
+    existing read-before-edit safety invariant.
+
+    Any unsupported, oversized, or failed acquisition falls back to
+    the original search behavior.
+    """
+
+    if not (
+        state.allow_write
+        and state.allow_run
+        and task_looks_test_related(
+            task
+        )
+        and state.full_tests_run
+        and not state.full_tests_passed
+        and not state.change_needs_test
+    ):
+        return None
+
+    paths = (
+        parse_search_result_candidate_paths(
+            search_result
+        )
+    )
+
+    if not paths:
+        return None
+
+    original_read_files = set(
+        state.read_files
+    )
+
+    original_file_contents = dict(
+        state.file_contents
+    )
+
+    original_no_progress_steps = (
+        state.no_progress_steps
+    )
+
+    def rollback() -> None:
+
+        state.read_files.clear()
+        state.read_files.update(
+            original_read_files
+        )
+
+        state.file_contents.clear()
+        state.file_contents.update(
+            original_file_contents
+        )
+
+        state.no_progress_steps = (
+            original_no_progress_steps
+        )
+
+    evidence_parts: list[str] = []
+    total_chars = 0
+
+    for relative_path in paths:
+
+        if relative_path in state.read_files:
+
+            content = (
+                state.file_contents.get(
+                    relative_path
+                )
+            )
+
+            if not isinstance(
+                content,
+                str,
+            ):
+                rollback()
+                return None
+
+        else:
+
+            try:
+
+                execute_action(
+                    tools,
+                    {
+                        "action": "read_file",
+                        "args": {
+                            "relative_path":
+                                relative_path,
+                        },
+                    },
+                    state,
+                    task,
+                )
+
+            except Exception:
+
+                rollback()
+                return None
+
+            if (
+                relative_path
+                not in state.read_files
+            ):
+                rollback()
+                return None
+
+            content = (
+                state.file_contents.get(
+                    relative_path
+                )
+            )
+
+            if not isinstance(
+                content,
+                str,
+            ):
+                rollback()
+                return None
+
+        total_chars += len(
+            content
+        )
+
+        if total_chars > (
+            MAX_SEARCH_EVIDENCE_CHARS
+        ):
+            rollback()
+            return None
+
+        evidence_parts.append(
+            (
+                f"===== CURRENT FILE: "
+                f"{relative_path} =====\n"
+                f"{content}\n"
+                f"===== END CURRENT FILE: "
+                f"{relative_path} ====="
+            )
+        )
+
+    return (
+        search_result
+        + "\n\n"
+        + "CONTROLLER SEARCH AUTO EVIDENCE READ:\n"
+        + (
+            "The search hits belong to a small bounded set "
+            "of current files. The Controller performed real "
+            "read_file actions for them in this same round.\n"
+        )
+        + (
+            "These reads are authoritative CURRENT evidence. "
+            "Do NOT request read_file again for these files "
+            "in this debugging generation."
+        )
+        + "\n\n"
+        + "\n\n".join(
+            evidence_parts
+        )
+    )
+
+
+# ============================================================
 # Action Executor
 # ============================================================
 
@@ -1878,6 +2120,19 @@ def execute_action(
         ):
 
             state.no_progress_steps += 1
+
+        evidence_result = (
+            acquire_search_result_evidence(
+                tools,
+                state,
+                task,
+                result,
+            )
+        )
+
+        if evidence_result is not None:
+
+            result = evidence_result
 
         return (
             False,
@@ -3471,7 +3726,7 @@ def run_json_worker(
     allow_run: bool = False,
 ) -> str:
     """
-    Local Qwen JSON Coding Worker v0.3.13
+    Local Qwen JSON Coding Worker v0.3.14
 
     Hard permissions:
     - allow_write=False blocks source modifications.
@@ -4660,7 +4915,7 @@ if __name__ == "__main__":
     )
 
     print(
-        "Local Qwen JSON Coding Worker v0.3.13"
+        "Local Qwen JSON Coding Worker v0.3.14"
     )
 
     print(

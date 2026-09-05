@@ -2,7 +2,7 @@
 
 一个运行在本地 Qwen 模型上的 Coding Worker，通过 MCP 与 Codex 连接。
 
-当前稳定版本：**v0.3.13**
+当前稳定版本：**v0.3.14**
 
 ## 项目目标
 
@@ -34,7 +34,7 @@ Python Controller 负责：
 
 核心 Coding Worker。
 
-当前稳定基线：**v0.3.13**
+当前稳定基线：**v0.3.14**
 
 主要功能：
 
@@ -50,6 +50,7 @@ Python Controller 负责：
 - Infrastructure Telemetry
 - Tail Nonce
 - Controller-Driven Post-Change Validation
+- Search-Driven Evidence Acquisition
 - Validation Tail Reserve
 
 ### qwen_mcp_gateway.py

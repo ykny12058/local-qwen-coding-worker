@@ -4,6 +4,33 @@
 
 \## 当前稳定版本
 
+### v0.3.14 — Search-Driven Evidence Acquisition
+
+This release reduces an investigation round on bounded failing-test searches by allowing the Python Controller to acquire authoritative current-file evidence immediately after `search_code`, while preserving the existing read-before-edit and validation safety model.
+
+Main changes:
+
+- Qwen remains responsible for deciding what to search.
+- After a qualifying `search_code`, the Controller may perform real `read_file` actions for the bounded set of candidate files in the same LLM round.
+- Candidate acquisition is limited to at most 3 distinct files.
+- `MAX_SEARCH_EVIDENCE_CHARS = 8000` limits the aggregate CURRENT file-content characters acquired for Bridge injection. It does not include the original search-result text, labels, separators, or explanatory metadata.
+- Windows backslash paths are canonicalized to forward slashes only at the Search-to-Read Bridge boundary.
+- Actual `read_file` actions register normal authoritative state, so the existing read-before-edit invariant remains intact.
+- Malformed search output, too many candidate files, oversized acquired content, or a read failure causes rollback and falls back to the v0.3.13 search behavior.
+- Controller-driven post-change validation and the Qwen-owned final `finish` path are unchanged.
+- The official regression suite remains 8 scenarios.
+
+Regression result:
+
+    8 passed, 0 failed
+
+Measured result on the same `single_validator_bug` modified-path regression:
+
+    v0.3.13: 5 LLM rounds
+    v0.3.14: 4 LLM rounds
+
+This reduces the measured path by 1 LLM round, or 20.0%. This measurement applies only to this regression scenario and is not a fixed performance claim for all tasks.
+
 ### v0.3.13 — Controller-Driven Post-Change Validation
 
 This release moves deterministic post-change validation from separate LLM rounds into the Python Controller while preserving the existing validation requirements.

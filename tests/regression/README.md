@@ -77,3 +77,14 @@ The suite covers:
 - Validation Tail continuation
 - Qwen-owned final finish
 - Controller finish gates
+
+## Search-Driven Evidence Acquisition
+v0.3.14 adds a bounded Search-to-Read Bridge for qualifying failing-test investigations.
+The official Regression Harness remains 8 scenarios. No new runner.py scenario is added in this release.
+Release qualification additionally verified these Bridge properties outside the official eight-scenario runner:
+- bounded successful acquisition
+- malformed-search fallback
+- too-many-files fallback
+- oversized-evidence rollback
+- read-exception rollback
+The release-candidate deterministic Bridge probes passed 5/5, and the official production Regression Harness passed 8/8.

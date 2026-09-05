@@ -459,3 +459,42 @@ Fail-stop rules:
 - Read Refresh Recovery remains active after post-change complete pytest.
 
 Validation Tail remains available when the base coding budget is exhausted. If Controller-driven mechanical validation has already succeeded, the tail requires only the final Qwen `finish` action.
+
+## 15. Search-Driven Evidence Acquisition
+
+Starting with v0.3.14, a qualifying failing-test search may be followed by bounded authoritative evidence acquisition inside the Python Controller.
+
+The responsibility boundary is:
+
+    Qwen chooses search_code
+    -> WorkspaceTools performs deterministic search
+    -> Controller parses a bounded set of candidate paths
+    -> Controller performs real read_file actions
+    -> normal read state is registered
+    -> search results and CURRENT file evidence return in the same LLM round
+    -> Qwen reasons about the evidence and chooses the edit
+
+The Bridge activates only when all required conditions are satisfied, including writable/runnable mode, a test-related task, complete pytest already run and failing, and no pending post-change validation.
+
+Safety bounds:
+
+- At most 3 distinct candidate files are automatically acquired.
+- At most 8000 aggregate CURRENT file-content characters are acquired for Bridge injection.
+- The 8000-character limit applies to acquired file content, not the entire final prompt payload.
+- Windows backslashes are canonicalized to / only at the Bridge boundary.
+- Search snippets themselves are not promoted to authoritative source evidence.
+- Real read_file actions continue to satisfy the existing read-before-edit invariant.
+
+Fallback behavior is fail-closed:
+
+    malformed search result
+    OR too many candidate files
+    OR acquired content exceeds the bound
+    OR read_file fails
+    -> rollback Bridge read state
+    -> preserve the original search result
+    -> continue with v0.3.13 search behavior
+
+The first v0.3.14 implementation does not preflight file size before read_file; an oversized file can be read into Controller memory before the aggregate content limit causes rollback. Oversized Bridge evidence is not injected into the LLM.
+
+Search-Driven Evidence Acquisition does not change Controller-driven post-change validation, Validation Tail, the finish hard gate, or Qwen ownership of final completion.
